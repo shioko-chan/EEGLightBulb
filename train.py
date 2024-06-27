@@ -1,13 +1,10 @@
 import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, random_split
 from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torchvision
-import torchvision.transforms as transforms
-
 
 train_name = "first"
 save_path = Path(f"models/{train_name}")
@@ -84,9 +81,14 @@ for label in data_path.glob("*"):
     labels_all.extend(labels)
 
 dataset = NpyDataset(npy_files_all, labels_all)
+train_size = int(len(dataset) * 0.8)
+train_dataset, val_dataset = random_split(
+    dataset, [train_size, len(dataset) - train_size]
+)
 
 batch_size = 4
-dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
 
 device = torch.device("cuda:0")
 
@@ -102,12 +104,10 @@ optimizer = optim.Adam(model.parameters(), lr=0.001)
 
 num_epochs = 10
 
-
 for epoch in range(num_epochs):
     total_loss = 0.0
-    for batch in dataloader:
+    for batch in train_dataloader:
         inputs, labels = batch[0].to(device), batch[1].to(device)
-
         optimizer.zero_grad()
         outputs = model(inputs)
         loss = criterion(outputs, labels)
@@ -116,11 +116,28 @@ for epoch in range(num_epochs):
 
         total_loss += loss.item()
 
-    print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {total_loss / len(dataloader):.4f}")
+    print(
+        f"Epoch [{epoch+1}/{num_epochs}], Loss: {total_loss / len(train_dataloader):.6f}"
+    )
 
     if (epoch + 1) % 5 == 0:
         model_path = save_path / f"lstm_model_epoch{epoch+1}.pt"
         torch.save(model.state_dict(), model_path)
         print(f"Model saved at {model_path}")
+        model.eval()
+        total_loss = 0.0
+        total_correct = 0
+        for batch in val_dataloader:
+            inputs, labels = batch[0].to(device), batch[1].to(device)
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
 
+            total_loss += loss.item()
+            _, predicted = torch.max(outputs, 1)
+            total_correct += (predicted == labels).sum().item()
+
+        print(
+            f"Val loss at Epoch [{epoch+1}/{num_epochs}], Loss: {total_loss / len(train_dataloader):.6f}, Accuracy: {total_correct / len(val_dataset):.6f}"
+        )
+        model.train()
 print("Training finished.")

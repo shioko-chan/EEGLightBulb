@@ -5,38 +5,82 @@ import matplotlib.pyplot as plt
 from pyOpenBCI import OpenBCICyton
 import numpy as np
 from pathlib import Path
+from psychopy import visual, core, event
+from scipy.signal import iirnotch, filtfilt, butter
+
 
 eeg_data_queue = queue.Queue()
 
 
+board = OpenBCICyton(port="COM3", daisy=False)
+fs = 250.0
+
+notch_freq = 50.0
+
+quality_factor = 30.0
+
+b, a = iirnotch(notch_freq, quality_factor, fs)
+
+lowcut = 5.0
+highcut = 50.0
+order = 4
+b, a = butter(order, [lowcut, highcut], btype="band", fs=fs)
+
+
 def eeg_callback(sample):
+    eeg_data_filtered = filtfilt(b, a, sample.channels_data, axis=0)
+    eeg_data_filtered = filtfilt(b, a, eeg_data_filtered, axis=0)
     eeg_data_queue.put((time.time(), sample.channels_data))
 
-
-board = OpenBCICyton(port="COM3", daisy=False)
 
 eeg_thread = threading.Thread(target=board.start_stream, args=(eeg_callback,))
 eeg_thread.start()
 
-num_classes = 2
-samples_per_class = 10
+samples_per_class = 20
 sampling_duration = 1
+
+class_labels = ["Left", "Right", "Up", "Down"]
+num_classes = len(class_labels)
+
+win = visual.Window([800, 600], monitor="testMonitor", units="pix")
+
 eeg_data = []
 
-class_labels = ["must have light", "not relative"]
+cue_text = visual.TextStim(win, text=f"Imagine movement of the ball")
+cue_text.draw()
+win.flip()
+core.wait(5)
 
 try:
     for i in range(num_classes):
-        if i == 0:
-            continue
         for j in range(samples_per_class):
-            print(
-                f"###Get ready for {class_labels[i]}, sampling will start in 2 seconds..."
+            ball = visual.Circle(
+                win=win, radius=10, fillColor="blue", lineColor="blue", units="pix"
             )
-            time.sleep(2)
-            print(f"###Starting {class_labels[i]} sampling...")
-
             start_time = time.time()
+            x_pos = 0
+            y_pos = 0
+            if i == 0:
+                x_speed = -4
+                y_speed = 0
+            if i == 1:
+                x_speed = 4
+                y_speed = 0
+            if i == 2:
+                x_speed = 0
+                y_speed = -3
+            if i == 3:
+                x_speed = 0
+                y_speed = 3
+
+            while x_pos < 400 and x_pos > -400 and y_pos < 300 and y_pos > -300:
+                x_pos += x_speed
+                y_pos += y_speed
+                ball.pos = (x_pos, y_pos)
+                ball.draw()
+                win.flip()
+                core.wait(sampling_duration / 100)
+
             current_class_data = []
             while True:
                 if not eeg_data_queue.empty():
@@ -46,11 +90,14 @@ try:
                     if t > start_time + sampling_duration:
                         break
                     current_class_data.append(data)
-
             eeg_data.append((i, current_class_data))
+            if j % 5 == 0 and j != 0:
+                cue_text = visual.TextStim(win, text=f"break time for 5s")
+                cue_text.draw()
+                win.flip()
+                core.wait(5)
+        print("finish one sample.")
 
-            print(f"###Finished {class_labels[i]} sampling.")
-            time.sleep(1)
 
 except KeyboardInterrupt:
     print("Data collection interrupted.")
@@ -68,3 +115,5 @@ for label, data in eeg_data:
     np.save(data_path / f"{round(time.time()*1000)}.npy", data)
 
 print("EEG data and labels saved.")
+win.close()
+core.quit()
