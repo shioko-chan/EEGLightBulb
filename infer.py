@@ -63,8 +63,7 @@ try:
             output = model(data)
             _, predicted = torch.max(output, 1)
             if int(predicted) == 0:
-                # server_socket.sendto(b"toggle", ("192.168.137.6", 12345))
-                pass
+                server_socket.sendto(b"toggle", ("192.168.137.6", 12345))
         except:
             pass
 
